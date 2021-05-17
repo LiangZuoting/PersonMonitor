@@ -1,13 +1,18 @@
-#include "paddle_api.h"
-#include <arm_neon.h>
-#include <opencv2/opencv.hpp>
-#include <opencv2/highgui.hpp>
-#include <opencv2/core/core.hpp>
 #include <stdio.h>
 #include <sys/time.h>
 #include <unistd.h>
 #include <vector>
 #include <limits>
+#include <thread>
+#include <condition_variable>
+#include <mutex>
+#include <chrono>
+#include <arm_neon.h>
+#include <opencv2/opencv.hpp>
+#include <opencv2/highgui.hpp>
+#include <opencv2/core/core.hpp>
+#include "paddle_api.h"
+#include "httplib.h"
 
 const int CPU_THREAD_NUM = 2;
 const paddle::lite_api::PowerMode CPU_POWER_MODE =
@@ -70,8 +75,7 @@ void preprocess(cv::Mat &input_image, const std::vector<float> &input_mean,
   }
 }
 
-cv::Mat process(cv::Mat &input_image,
-                std::vector<std::string> &word_labels,
+void process(cv::Mat &input_image,
                 std::shared_ptr<paddle::lite_api::PaddlePredictor> &predictor) {
   // preprocess
   std::unique_ptr<paddle::lite_api::Tensor> input_tensor(
@@ -98,18 +102,22 @@ cv::Mat process(cv::Mat &input_image,
   for (auto dim : output_tensor->shape()) {
     output_size *= dim;
   }
+  bool has_person = false;
     for (int64_t i = 0; i < output_size; i += 6) {
         int class_id = static_cast<int>(output_data[i]);
     if (output_data[i + 1] < SCORE_THRESHOLD || class_id != PERSON_CLASS_ID) {
       continue;
     }
     // person found
+	has_person = true;
     break;
     }
+	std::string json = R"({"from": "monitor", "protocol": "miot", "ip": "192.168.3.29", "siid": 2, "piid": 1, "value": )";
+	json += has_person ? R"(true})" : R"(false})";
+	httplib::Client("http://192.168.3.27").Post("/", json, "application/json");
+
   printf("Preprocess time: %f ms\n", preprocess_time);
   printf("Prediction time: %f ms\n", prediction_time);
-
-  return output_image;
 }
 
 //
@@ -117,17 +125,17 @@ cv::Mat process(cv::Mat &input_image,
 static const int START_HOUR = 7;
 static const int END_HOUR = 19;
 
-pair<bool, tm*> is_day(const chrono::system_clock::time_point &tp)
+std::pair<bool, tm*> is_day(const std::chrono::system_clock::time_point &tp)
 {
-	auto time = chrono::system_clock::to_time_t(tp);
+	auto time = std::chrono::system_clock::to_time_t(tp);
 	auto tm = localtime(&time);
 	return { tm->tm_hour < END_HOUR && tm->tm_hour >= START_HOUR, tm };
 }
 
 // next start time
-chrono::system_clock::time_point get_next_start_tp()
+std::chrono::system_clock::time_point get_next_start_tp()
 {
-	auto now = chrono::system_clock::now();
+	auto now = std::chrono::system_clock::now();
 	auto ret = is_day(now);
 	tm t = { 0 };
 	if (ret.first || ret.second->tm_hour < START_HOUR) // today's
@@ -136,15 +144,15 @@ chrono::system_clock::time_point get_next_start_tp()
 	}
 	else // next day's
 	{
-		auto next_day = chrono::system_clock::now() + chrono::hours(24 - START_HOUR);
-		auto time = chrono::system_clock::to_time_t(next_day);
+		auto next_day = std::chrono::system_clock::now() + std::chrono::hours(24 - START_HOUR);
+		auto time = std::chrono::system_clock::to_time_t(next_day);
 		auto tm = localtime(&time);
 		t = *tm;
 	}
 	t.tm_hour = START_HOUR;
 	t.tm_min = 0;
 	t.tm_sec = 0;
-	return chrono::system_clock::from_time_t(mktime(&t));
+	return std::chrono::system_clock::from_time_t(mktime(&t));
 }
 
 int main(int argc, char **argv) {
@@ -166,17 +174,17 @@ int main(int argc, char **argv) {
       paddle::lite_api::CreatePaddlePredictor<paddle::lite_api::MobileConfig>(config);
       
       bool stop = false;
-	condition_variable cv;
-	mutex mtx;
-	thread t([&] {
+	  std::condition_variable cv;
+	  std::mutex mtx;
+	  std::thread t([&] {
 		while (!stop)
 		{
 			cv::VideoCapture cap;
-			if (!is_day(chrono::system_clock::now()).first && !stop)
+			if (!is_day(std::chrono::system_clock::now()).first && !stop)
 			{
 				cap.open(0);
 			}
-			while (!is_day(chrono::system_clock::now()).first && !stop)
+			while (!is_day(std::chrono::system_clock::now()).first && !stop)
 			{
 				cv::Mat img;
 				cap >> img;
@@ -188,8 +196,8 @@ int main(int argc, char **argv) {
 			}
 			auto next_start_tp = get_next_start_tp();
 			{
-				unique_lock<mutex> lock(mtx);
-				cv.wait_until(lock, next_start_tp, [&]() { return stop; });
+				std::unique_lock<std::mutex> lock(mtx);
+				cv.wait_until(lock, next_start_tp);
 			}
 		}
 		});
