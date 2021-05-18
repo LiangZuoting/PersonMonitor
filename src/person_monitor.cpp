@@ -21,7 +21,7 @@ const std::vector<int64_t> INPUT_SHAPE = { 1, 3, 320, 320 };
 const std::vector<float> INPUT_MEAN = { 0.5f, 0.5f, 0.5f };
 const std::vector<float> INPUT_STD = { 0.5f, 0.5f, 0.5f };
 const float SCORE_THRESHOLD = 0.5f;
-const int PERSON_CLASS_ID = 15;
+const int PERSON_CLASS_ID = 1;
 
 inline int64_t get_current_us() {
 	struct timeval time;
@@ -84,16 +84,10 @@ void process(cv::Mat &input_image,
 	int input_width = INPUT_SHAPE[3];
 	int input_height = INPUT_SHAPE[2];
 	auto *input_data = input_tensor->mutable_data<float>();
-	double preprocess_start_time = get_current_us();
 	preprocess(input_image, INPUT_MEAN, INPUT_STD, input_width, input_height,
 		input_data);
-	double preprocess_end_time = get_current_us();
-	double preprocess_time = (preprocess_end_time - preprocess_start_time) / 1000.0f;
 	// predict
-	auto start = get_current_us();
 	predictor->Run();
-	auto end = get_current_us();
-	double prediction_time = (end - start) / 1000.0f;
 	// postprocess
 	std::unique_ptr<const paddle::lite_api::Tensor> output_tensor(
 		std::move(predictor->GetOutput(0)));
@@ -115,9 +109,6 @@ void process(cv::Mat &input_image,
 	std::string json = R"({"from": "monitor", "protocol": "miot", "ip": "192.168.3.29", "siid": 2, "piid": 1, "value": )";
 	json += has_person ? R"(true})" : R"(false})";
 	httplib::Client("http://192.168.3.27").Post("/", json, "application/json");
-
-	printf("Preprocess time: %f ms\n", preprocess_time);
-	printf("Prediction time: %f ms\n", prediction_time);
 }
 
 //
@@ -182,7 +173,8 @@ int main(int argc, char **argv) {
 			cv::VideoCapture cap;
 			if (!is_day(std::chrono::system_clock::now()).first && !stop)
 			{
-				cap.open(0);
+				cap.open("rtsp://admin:raul19870101@192.168.3.33");
+				printf("rtsp connected.");
 			}
 			while (!is_day(std::chrono::system_clock::now()).first && !stop)
 			{
