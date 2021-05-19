@@ -173,7 +173,7 @@ int main(int argc, char **argv) {
 			cv::VideoCapture cap;
 			if (!is_day(std::chrono::system_clock::now()).first && !stop)
 			{
-				cap.open("rtsp://admin:raul19870101@192.168.3.33");
+				cap.open("rtsp://admin:password@192.168.3.33");
 				printf("rtsp connected.");
 			}
 			while (!is_day(std::chrono::system_clock::now()).first && !stop)
