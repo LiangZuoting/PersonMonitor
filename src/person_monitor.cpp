@@ -75,7 +75,7 @@ void preprocess(cv::Mat &input_image, const std::vector<float> &input_mean,
 	}
 }
 
-void process(cv::Mat &input_image,
+bool process(cv::Mat &input_image,
 	std::shared_ptr<paddle::lite_api::PaddlePredictor> &predictor) {
 	// preprocess
 	std::unique_ptr<paddle::lite_api::Tensor> input_tensor(
@@ -106,9 +106,7 @@ void process(cv::Mat &input_image,
 		has_person = true;
 		break;
 	}
-	std::string json = R"({"from": "monitor", "protocol": "miot", "ip": "192.168.3.29", "siid": 2, "piid": 1, "value": )";
-	json += has_person ? R"(true})" : R"(false})";
-	httplib::Client("http://192.168.3.27").Post("/", json, "application/json");
+	return has_person;
 }
 
 //
@@ -167,20 +165,35 @@ int main(int argc, char **argv) {
 	bool stop = false;
 	std::condition_variable cv;
 	std::mutex mtx;
+	httplib::Client smartHome("http://192.168.3.27");
+	smartHome.set_keep_alive(true);
 	std::thread t([&] {
 		while (!stop)
 		{
 			cv::VideoCapture cap;
-			if (!is_day(std::chrono::system_clock::now()).first && !stop)
+			// try to open stream each 5 sec until it is connected.
+			while (!is_day(std::chrono::system_clock::now()).first && !stop && !cap.isOpened())
 			{
 				cap.open("rtsp://admin:password@192.168.3.33");
+				if (!cap.isOpened())
+				{
+					std::this_thread::sleep_for(std::chrono::seconds(5));
+					continue;
+				}
 				printf("rtsp connected.");
 			}
 			while (!is_day(std::chrono::system_clock::now()).first && !stop)
 			{
 				cv::Mat img;
 				cap >> img;
-				process(img, predictor);
+				bool has_person = process(img, predictor);
+				std::string json = R"({"from": "monitor", "protocol": "miot", "ip": "192.168.3.29", "siid": 2, "piid": 1, "value": )";
+				json += has_person ? R"(true})" : R"(false})";
+				auto ret = smartHome.Post("/", json, "application/json");
+				if (ret.error() != httplib::Success)
+				{
+					std::this_thread::sleep_for(std::chrono::seconds(5));
+				}
 			}
 			if (cap.isOpened())
 			{
