@@ -164,11 +164,11 @@ int main(int argc, char **argv) {
 		paddle::lite_api::CreatePaddlePredictor<paddle::lite_api::MobileConfig>(config);
 
 	bool stop = false;
-	std::condition_variable cv;
-	std::mutex mtx;
-	httplib::Client smartHome("http://192.168.3.27");
-	smartHome.set_keep_alive(true);
-	std::thread t([&] {
+	std::mutex mat_mutex;
+	cv::Mat latest_mat;
+	std::condition_variable capture_cv;
+	std::mutex capture_cv_mutex;
+	std::thread capture_thread([&] {
 		while (!stop)
 		{
 			cv::VideoCapture cap;
@@ -183,22 +183,13 @@ int main(int argc, char **argv) {
 				}
 				cap.set(cv::CAP_PROP_FRAME_WIDTH, 1280);
 				cap.set(cv::CAP_PROP_FRAME_HEIGHT, 720);
-				cap.set(cv::CAP_PROP_FPS, 30);
+				cap.set(cv::CAP_PROP_FPS, 4);
 				printf("camera opened.\n");
 			}
 			while (!is_day(std::chrono::system_clock::now()).first && !stop)
 			{
-				cv::Mat img;
-				if (!cap.read(img))
-				{
-					printf("read from camera failed.\n");
-					continue;
-				}
-				bool has_person = process(img, predictor);
-				std::string json = R"({"from": "monitor", "protocol": "miot", "ip": "192.168.3.29", "siid": 2, "piid": 1, "value": )";
-				json += has_person ? R"(true})" : R"(false})";
-				smartHome.Post("/", json, "application/json");
-				std::this_thread::sleep_for(std::chrono::milliseconds(100));
+				std::lock_guard<std::mutex> lock(mat_mutex);
+				cap >> latest_mat;
 			}
 			if (cap.isOpened())
 			{
@@ -206,12 +197,45 @@ int main(int argc, char **argv) {
 			}
 			auto next_start_tp = get_next_start_tp();
 			{
-				std::unique_lock<std::mutex> lock(mtx);
-				cv.wait_until(lock, next_start_tp);
+				std::unique_lock<std::mutex> lock(capture_cv_mutex);
+				capture_cv.wait_until(lock, next_start_tp);
+			}
+		}
+		});
+	
+	std::condition_variable detection_cv;
+	std::mutex detection_cv_mutex;
+	httplib::Client smartHome("http://192.168.3.27");
+	smartHome.set_keep_alive(true);
+	std::thread detection_thread([&] {
+		while (!stop)
+		{
+			while (!is_day(std::chrono::system_clock::now()).first && !stop)
+			{
+				cv::Mat mat;
+				{
+					std::lock_guard<std::mutex> lock(mat_mutex);
+					mat = latest_mat;
+				}
+				if (mat.empty())
+				{
+					continue;
+				}
+				bool has_person = process(mat, predictor);
+				std::string json = R"({"from": "monitor", "protocol": "miot", "ip": "192.168.3.29", "siid": 2, "piid": 1, "value": )";
+				json += has_person ? R"(true})" : R"(false})";
+				smartHome.Post("/", json, "application/json");
+				std::this_thread::sleep_for(std::chrono::milliseconds(100));
+			}
+			auto next_start_tp = get_next_start_tp();
+			{
+				std::unique_lock<std::mutex> lock(detection_cv_mutex);
+				detection_cv.wait_until(lock, next_start_tp);
 			}
 		}
 		});
 
-	t.join();
+	capture_thread.join();
+	detection_thread.join();
 	return 0;
 }
