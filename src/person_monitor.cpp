@@ -9,6 +9,7 @@
 #include <chrono>
 #include <arm_neon.h>
 #include <opencv2/opencv.hpp>
+#include <opencv2/videoio.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/core/core.hpp>
 #include "paddle_api.h"
@@ -171,29 +172,33 @@ int main(int argc, char **argv) {
 		while (!stop)
 		{
 			cv::VideoCapture cap;
-			// try to open stream each 5 sec until it is connected.
+			// try to open camera each 5 sec until it is connected.
 			while (!is_day(std::chrono::system_clock::now()).first && !stop && !cap.isOpened())
 			{
-				cap.open("rtsp://admin:password@192.168.3.33");
+				cap.open(0);
 				if (!cap.isOpened())
 				{
 					std::this_thread::sleep_for(std::chrono::seconds(5));
 					continue;
 				}
-				printf("rtsp connected.");
+				cap.set(cv::CAP_PROP_FRAME_WIDTH, 1280);
+				cap.set(cv::CAP_PROP_FRAME_HEIGHT, 720);
+				cap.set(cv::CAP_PROP_FPS, 30);
+				printf("camera opened.\n");
 			}
 			while (!is_day(std::chrono::system_clock::now()).first && !stop)
 			{
 				cv::Mat img;
-				cap >> img;
+				if (!cap.read(img))
+				{
+					printf("read from camera failed.\n");
+					continue;
+				}
 				bool has_person = process(img, predictor);
 				std::string json = R"({"from": "monitor", "protocol": "miot", "ip": "192.168.3.29", "siid": 2, "piid": 1, "value": )";
 				json += has_person ? R"(true})" : R"(false})";
-				auto ret = smartHome.Post("/", json, "application/json");
-				if (ret.error() != httplib::Success)
-				{
-					std::this_thread::sleep_for(std::chrono::seconds(5));
-				}
+				smartHome.Post("/", json, "application/json");
+				std::this_thread::sleep_for(std::chrono::milliseconds(100));
 			}
 			if (cap.isOpened())
 			{
