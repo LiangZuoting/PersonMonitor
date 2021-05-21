@@ -190,6 +190,7 @@ int main(int argc, char **argv) {
 			{
 				std::lock_guard<std::mutex> lock(mat_mutex);
 				cap >> latest_mat;
+				std::this_thread::sleep_for(std::chrono::milliseconds(100));
 			}
 			if (cap.isOpened())
 			{
@@ -225,7 +226,7 @@ int main(int argc, char **argv) {
 				std::string json = R"({"from": "monitor", "protocol": "miot", "ip": "192.168.3.29", "siid": 2, "piid": 1, "value": )";
 				json += has_person ? R"(true})" : R"(false})";
 				smartHome.Post("/", json, "application/json");
-				std::this_thread::sleep_for(std::chrono::milliseconds(100));
+				std::this_thread::sleep_for(std::chrono::milliseconds(200));
 			}
 			auto next_start_tp = get_next_start_tp();
 			{
