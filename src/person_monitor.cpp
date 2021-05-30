@@ -119,30 +119,19 @@ std::pair<bool, tm *> is_day(const std::chrono::system_clock::time_point &tp)
 {
 	auto time = std::chrono::system_clock::to_time_t(tp);
 	auto tm = localtime(&time);
-	return { tm->tm_hour < END_HOUR &&tm->tm_hour >= START_HOUR, tm };
+	return { tm->tm_hour < END_HOUR && tm->tm_hour >= START_HOUR, tm };
 }
 
 // next start time
 std::chrono::system_clock::time_point get_next_start_tp()
 {
 	auto now = std::chrono::system_clock::now();
-	auto ret = is_day(now);
-	tm t = { 0 };
-	if (ret.first || ret.second->tm_hour < START_HOUR) // today's
-	{
-		t = *ret.second;
-	}
-	else // next day's
-	{
-		auto next_day = std::chrono::system_clock::now() + std::chrono::hours(24 - START_HOUR);
-		auto time = std::chrono::system_clock::to_time_t(next_day);
-		auto tm = localtime(&time);
-		t = *tm;
-	}
-	t.tm_hour = START_HOUR;
-	t.tm_min = 0;
-	t.tm_sec = 0;
-	return std::chrono::system_clock::from_time_t(mktime(&t));
+	auto time = std::chrono::system_clock::to_time_t(now);
+	auto tm = localtime(&time);
+	tm->tm_hour = END_HOUR;
+	tm->tm_min = 0;
+	tm->tm_sec = 0;
+	return std::chrono::system_clock::from_time_t(mktime(tm));
 }
 
 int main(int argc, char **argv) {
@@ -190,7 +179,7 @@ int main(int argc, char **argv) {
 			{
 				std::lock_guard<std::mutex> lock(mat_mutex);
 				cap >> latest_mat;
-				std::this_thread::sleep_for(std::chrono::milliseconds(100));
+				std::this_thread::sleep_for(std::chrono::milliseconds(50));
 			}
 			if (cap.isOpened())
 			{
